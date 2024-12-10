@@ -1,6 +1,6 @@
 '''tf_util.py
 Helper/utility functions related to using TensorFlow for Transfer Learning and working with images
-YOUR NAMES HERE
+Michelle Phan and Varsha Yarram
 CS 343: Neural Networks
 Project 4: Transfer Learning
 Fall 2024
@@ -23,7 +23,17 @@ def load_pretrained_net(net_name='vgg19'):
 
     NOTE: Pretrained net should NOT be trainable and NOT include the output layer.
     '''
-    pass
+    nets = {
+        "vgg19": tf.keras.applications.VGG19,
+    }
+
+    net_name = net_name.lower()
+    if net_name not in nets:
+        raise ValueError(f"Unsupported network name '{net_name}'. Supported names: {list(nets.keys())}")
+    
+    pretrained_net = nets[net_name](include_top=False)
+    pretrained_net.trainable = False
+    return pretrained_net
 
 
 def get_all_layer_strs(pretrained_net):
@@ -37,7 +47,9 @@ def get_all_layer_strs(pretrained_net):
     -----------
     Python list of str. Length is the number of layers in the pretrained network.
     '''
-    pass
+    return [layer.name for layer in pretrained_net.layers]
+
+    
 
 def filter_layer_strs(layer_names, match_str='conv4'):
     '''Extracts the layer name strs from `layer_names` (the complete list) that have `match_str` in the name.
@@ -51,24 +63,33 @@ def filter_layer_strs(layer_names, match_str='conv4'):
     -----------
     Python list of str. The list of layers from `layer_names` that include the string `match_str`
     '''
-    pass
+    # Filter and return layer names that include `match_str`
+    return [name for name in layer_names if match_str in name]
 
 
 def preprocess_image2tf(img, as_var):
-    '''Converts an image (in numpy ndarray format) to TensorFlow tensor format
+    '''Converts an image (in numpy ndarray format) to TensorFlow tensor format.
 
     Parameters:
     -----------
-    img: ndarray. shape=(Iy, Ix, n_chans). A single image
-    as_var: bool. Do we represent the tensor as a tf.Variable?
+    img: ndarray. shape=(Iy, Ix, n_chans). A single image.
+    as_var: bool. Indicates if the tensor should be represented as a tf.Variable.
 
     Returns:
     -----------
-    tf tensor. dtype: tf.float32. shape=(1, Iy, Ix, n_chans)
+    tf tensor. dtype=tf.float32. shape=(1, Iy, Ix, n_chans).
 
-    NOTE: Notice the addition of the leading singleton batch dimension in the tf tensor returned.
+    NOTE: Adds a leading singleton batch dimension to the returned tf tensor.
     '''
-    pass
+    # Convert the image to tf.float32 and add a batch dimension
+    tensor = tf.convert_to_tensor(img, dtype=tf.float32)
+    tensor = tf.expand_dims(tensor, axis=0)  # Add singleton batch dimension
+    
+    # Convert to tf.Variable if as_var is True
+    if as_var:
+        tensor = tf.Variable(tensor)
+
+    return tensor
 
 
 def make_readout_model(pretrained_net, layer_names):
@@ -86,7 +107,13 @@ def make_readout_model(pretrained_net, layer_names):
     tf.keras.Model object (readout model) that provides a readout of the netAct values in the selected layer list
         (`layer_names`).
     '''
-    pass
+    # Get the outputs of the specified layers
+    outputs = [pretrained_net.get_layer(name).output for name in layer_names]
+
+    # Create a new model with the same input as the pretrained network
+    readout_model = tf.keras.Model(inputs=pretrained_net.input, outputs=outputs)
+
+    return readout_model
 
 
 def tf2image(tensor):

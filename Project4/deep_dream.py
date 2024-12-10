@@ -1,6 +1,6 @@
 '''deep_dream.py
 Generate art with a pretrained neural network using the DeepDream algorithm
-YOUR NAMES HERE
+Michelle Phan and Varsha Yarram
 CS 343: Neural Networks
 Project 4: Transfer Learning
 Fall 2024
@@ -8,6 +8,7 @@ Fall 2024
 import time
 import tensorflow as tf
 import matplotlib.pyplot as plt
+import os
 
 import tf_util
 
@@ -32,11 +33,14 @@ class DeepDream:
         '''
         self.loss_history = None
 
-        pass
+        self.pretrained_net = pretrained_net
+        self.selected_layers_names = selected_layers_names
+        self.readout_model = tf_util.make_readout_model(self.pretrained_net, self.selected_layers_names)
 
     def loss_layer(self, layer_net_acts):
-        '''Computes the contribution to the total loss from the current layer with netAct values `layer_net_acts`. The
-        loss contribution is the mean of all the netAct values in the current layer.
+        '''Computes the contribution to the total loss from the current layer with netAct values `layer_net_acts`.
+
+        The loss contribution is the mean of all the netAct values in the current layer.
 
         Parameters:
         -----------
@@ -47,7 +51,12 @@ class DeepDream:
         -----------
         loss component from current layer. float. Mean of all the netAct values in the current layer.
         '''
-        pass
+        # Compute the mean of all netAct values
+        loss = tf.reduce_mean(layer_net_acts)
+
+        # Return as a Python float
+        return loss
+        
 
     def forward(self, gen_img, standardize_grads=True, eps=1e-8):
         '''Performs forward pass through the pretrained network with the generated image `gen_img`.
@@ -73,7 +82,27 @@ class DeepDream:
         Then:
         - Obtain the tracked gradients of the loss with respect to the generated image.
         '''
-        pass
+        with tf.GradientTape() as tape:
+            # Track the generated image for gradient computation
+            tape.watch(gen_img)
+
+            # Use the readout model to extract netAct values from the selected layers
+            net_act_values = self.readout_model(gen_img)
+
+            # Compute the average loss across all selected layers
+            losses = [self.loss_layer(act) for act in net_act_values]
+            loss = tf.math.reduce_mean(losses)
+
+        # Compute the gradients of the loss with respect to the generated image
+        grads = tape.gradient(loss, gen_img)
+
+        if standardize_grads:
+            # Standardize gradients to have mean 0 and standard deviation 1
+            grad_mean = tf.reduce_mean(grads)
+            grad_std = tf.math.reduce_std(grads)
+            grads = (grads - grad_mean) / (grad_std + eps)
+
+        return loss, grads
 
     def fit(self, gen_img, n_epochs=26, lr=0.01, print_every=25, plot=True, plot_fig_sz=(5, 5), export=True):
         '''Iteratively modify the generated image (`gen_img`) for `n_epochs` with the image gradients using the
@@ -111,7 +140,44 @@ class DeepDream:
         in the sign of the gradients.
         - Clipping is different than normalization!
         '''
-        pass
+        self.loss_history = []
+        start_time = time.time()
+
+        for epoch in range(1, n_epochs + 1):
+            # Compute forward pass and get loss and gradients
+            loss, grads = self.forward(gen_img, standardize_grads=True)
+            self.loss_history.append(loss.numpy())
+
+            # Apply gradient ascent update rule
+            gen_img.assign_add(lr * grads)
+
+            # Clip the pixel values to the range [0, 1]
+            gen_img.assign(tf.clip_by_value(gen_img, 0.0, 1.0))
+
+            # Print progress
+            if epoch == 1:
+                elapsed = time.time() - start_time
+                estimated_total_time = (elapsed / epoch) * n_epochs / 60
+                print(f"Epoch {epoch}/{n_epochs}: Loss = {loss.numpy():.5f} (Estimated total time: {estimated_total_time:.2f} minutes)")
+            elif epoch % print_every == 0:
+                print(f"Epoch {epoch}/{n_epochs}: Loss = {loss.numpy():.5f}")
+
+            # Plot the generated image
+            if plot and epoch % print_every == 0:
+                plt.figure(figsize=plot_fig_sz)
+                plt.imshow(gen_img[0])
+                plt.axis('off')
+                plt.show()
+
+            # Export the image
+            if export and epoch % print_every == 0:
+                output_dir = "deep_dream_output"
+                os.makedirs(output_dir, exist_ok=True)
+                filename = os.path.join(output_dir, f"image_{epoch}.jpg")
+                tf.keras.preprocessing.image.save_img(filename, gen_img[0].numpy())
+
+        return self.loss_history
+
 
     def fit_multiscale(self, gen_img, n_scales=4, scale_factor=1.3, n_epochs=26, lr=0.01, print_every=1, plot=True,
                        plot_fig_sz=(5, 5), export=True):
@@ -149,5 +215,41 @@ class DeepDream:
             So, wrap the resized image in a tf.Variable.
         3. After the first scale completes, always print out how long it took to finish the first scale and an estimate
         of how long it will take to complete all the scales (in minutes).
-        '''
-        pass
+        ''' 
+        self.loss_history = []
+        start_time = time.time()
+
+        for scale in range(1, n_scales + 1):
+            # Run the fit method for the current scale
+            self.fit(gen_img, n_epochs=n_epochs, lr=lr, print_every=n_epochs, plot=False, export=False)
+
+            # Print progress
+            if scale == 1:
+                elapsed = time.time() - start_time
+                estimated_total_time = (elapsed / scale) * n_scales / 60
+                print(f"Scale {scale}/{n_scales}: Completed (Estimated total time: {estimated_total_time:.2f} minutes)")
+            elif scale % print_every == 0:
+                print(f"Scale {scale}/{n_scales}: Completed")
+
+            # Plot the generated image
+            if plot:
+                plt.figure(figsize=plot_fig_sz)
+                plt.imshow(gen_img[0])
+                plt.axis('off')
+                plt.show()
+
+            # Export the image
+            if export and scale % print_every == 0:
+                output_dir = "deep_dream_output"
+                os.makedirs(output_dir, exist_ok=True)
+                filename = os.path.join(output_dir, f"scale_{scale}.jpg")
+                tf.keras.preprocessing.image.save_img(filename, gen_img[0].numpy())
+
+            # Resize the image for the next scale
+            new_size = [int(gen_img.shape[1] * scale_factor), int(gen_img.shape[2] * scale_factor)]
+            resized_img = tf.image.resize(gen_img, new_size)
+            gen_img = tf.Variable(resized_img, dtype=tf.float32)
+
+
+        return self.loss_history
+        
